@@ -1,11 +1,8 @@
 import os
 import time
 
-import librosa
-import numpy as np
-from scipy.io.wavfile import write
 import serial
-import sounddevice as sd
+import cv2
 
 """
 https://github.com/knflrpn/SwiCC_RP2040
@@ -42,29 +39,102 @@ Byte 2
 0x08 - Neutral
 """
 
-main_filepath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "main.wav")
-clip_filepath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "clip.wav")
+template_filepath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "baseline.png")
+template = cv2.imread(template_filepath)
 
-fs = 48000
-seconds = 20
-channels = 1
+method = cv2.TM_SQDIFF_NORMED
 
 ser = serial.Serial("COM3", 115200)
 ser.write(bytearray("+IMM 000002 \n", "ascii"))
-time.sleep(2)
+time.sleep(0.5)
+ser.write(bytearray("+IMM 000008 \n", "ascii"))
+time.sleep(0.5)
+ser.write(bytearray("+IMM 000002 \n", "ascii"))
+time.sleep(0.5)
+ser.write(bytearray("+IMM 000008 \n", "ascii"))
+time.sleep(0.5)
+ser.write(bytearray("+IMM 100008 \n", "ascii"))
+time.sleep(0.3)
+ser.write(bytearray("+IMM 000008 \n", "ascii"))
+time.sleep(1.5)
 
-count = 0
+"""
+expectations:
+- shiny:
+  - 0.000000 < val < 0.000002
+  - 190, 660
+- not shiny:
+  - 0.030086 < val < 0.030087
+  - 163, 660
+"""
+
+count = 6100
 
 while True:
-    # AED failed: no shiny
+    # start game
+    ser.write(bytearray("+IMM 000408 \n", "ascii"))
+    time.sleep(0.5)
+    ser.write(bytearray("+IMM 000008 \n", "ascii"))
+    time.sleep(0.5)
 
-    ser.write(bytearray("+IMM 000004 \n", "ascii"))
+    # skip update
+    ser.write(bytearray("+IMM 000000 \n", "ascii"))
+    time.sleep(0.5)
+    ser.write(bytearray("+IMM 000008 \n", "ascii"))
+    time.sleep(0.5)
+    ser.write(bytearray("+IMM 000408 \n", "ascii"))
+    time.sleep(0.5)
+    ser.write(bytearray("+IMM 000008 \n", "ascii"))
+    time.sleep(0.5)
+
+    # wait for user select
     time.sleep(2)
 
+    # select user
     ser.write(bytearray("+IMM 000408 \n", "ascii"))
-    time.sleep(.5)
+    time.sleep(0.5)
     ser.write(bytearray("+IMM 000008 \n", "ascii"))
-    time.sleep(.5)
+    time.sleep(0.5)
+
+    # wait for game to open
+    time.sleep(30)
+
+    # a to start
+    for i in range(4):
+        ser.write(bytearray("+IMM 000408 \n", "ascii"))
+        time.sleep(.5)
+        ser.write(bytearray("+IMM 000008 \n", "ascii"))
+        time.sleep(.5)
+
+    # wait for save to load
+    time.sleep(18)
+
+    # start battle
+    for i in range(5):
+        ser.write(bytearray("+IMM 000408 \n", "ascii"))
+        time.sleep(.5)
+        ser.write(bytearray("+IMM 000008 \n", "ascii"))
+        time.sleep(.5)
+
+    # wait for battle to start
+    time.sleep(24)
+
+    # catch
+    ser.write(bytearray("+IMM 000808 \n", "ascii"))
+    time.sleep(0.3)
+    ser.write(bytearray("+IMM 000008 \n", "ascii"))
+    time.sleep(0.3)
+    ser.write(bytearray("+IMM 000002 \n", "ascii"))
+    time.sleep(0.3)
+    ser.write(bytearray("+IMM 000008 \n", "ascii"))
+    time.sleep(0.3)
+    ser.write(bytearray("+IMM 000408 \n", "ascii"))
+    time.sleep(0.3)
+    ser.write(bytearray("+IMM 000008 \n", "ascii"))
+    time.sleep(0.3)
+
+    # wait for catch animation
+    time.sleep(20)
 
     # tap b through text
     for i in range(5):
@@ -73,50 +143,66 @@ while True:
         ser.write(bytearray("+IMM 000008 \n", "ascii"))
         time.sleep(.5)
 
-    ser.write(bytearray("+IMM 000204 \n", "ascii"))
-    time.sleep(3.3)
+    # wait for catch screen to close
+    time.sleep(5)
 
-    ser.write(bytearray("+IMM 000200 \n", "ascii"))
-    time.sleep(3.7)
-
-    # tap a through text
-    for i in range(5):
+    # check party
+    ser.write(bytearray("+IMM 000808 \n", "ascii"))
+    time.sleep(0.5)
+    ser.write(bytearray("+IMM 000008 \n", "ascii"))
+    time.sleep(1.5)
+    ser.write(bytearray("+IMM 000408 \n", "ascii"))
+    time.sleep(0.5)
+    ser.write(bytearray("+IMM 000008 \n", "ascii"))
+    time.sleep(1.5)
+    ser.write(bytearray("+IMM 000004 \n", "ascii"))
+    time.sleep(0.5)
+    ser.write(bytearray("+IMM 000008 \n", "ascii"))
+    time.sleep(0.5)
+    for i in range(2):
         ser.write(bytearray("+IMM 000408 \n", "ascii"))
         time.sleep(.5)
         ser.write(bytearray("+IMM 000008 \n", "ascii"))
-        time.sleep(.5)
+        time.sleep(1.5)
 
-    print("Recording...")
-    myrecording = sd.rec(int(seconds * fs), samplerate=fs, channels=channels)
-    sd.wait()  # Wait until recording is finished
-    print("Recording complete")
+    cap = cv2.VideoCapture(1)  # default: 0
 
-    write(main_filepath, fs, myrecording)
-    print(f"Saved as {main_filepath}")
+    if not cap.isOpened():
+        raise IOError("Cannot open webcam")
 
-    main_data, _ = librosa.load(main_filepath, sr=fs)
-    clip_data, _ = librosa.load(clip_filepath, sr=fs)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
-    threshold = 0.99999999
+    ret, frame = cap.read()
 
-    main_mfccs = librosa.feature.mfcc(y=main_data, sr=fs)
-    clip_mfccs = librosa.feature.mfcc(y=clip_data, sr=fs)
-
-    if clip_mfccs.shape[1] > main_mfccs.shape[1]:
+    if not ret:
         break
 
-    found = False
-    start_index = -1
-    for i in range(main_mfccs.shape[1] - clip_mfccs.shape[1] + 1):
-        corr_matrix = np.corrcoef(main_mfccs[:, i:i + clip_mfccs.shape[1]], clip_mfccs)
-        if corr_matrix[0, 1] == 1 and corr_matrix[1, 1] >= threshold and corr_matrix[2, 1] >= threshold and corr_matrix[3, 1] >= threshold and corr_matrix[4, 1] >= threshold and corr_matrix[5, 1] >= threshold and corr_matrix[6, 1] >= threshold and corr_matrix[7, 1] >= threshold and corr_matrix[8, 1] >= threshold and corr_matrix[9, 1] >= threshold and corr_matrix[10, 1] >= threshold and corr_matrix[11, 1] >= threshold:
-            found = True
+    result = cv2.matchTemplate(frame, template, method)
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
 
-    if found:
-        print("found shiny")
+    cap.release()
+    cv2.destroyAllWindows()
+
+    print(min_val)
+    print(min_loc)
+
+    if min_val < 0.03 or min_loc[0] > 165:
         break
-    else:
-        print("no shiny")
 
     count = count + 1
-    print(f"attempt: {count}")
+    print(count)
+
+    # close game
+    ser.write(bytearray("+IMM 100008 \n", "ascii"))
+    time.sleep(0.3)
+    ser.write(bytearray("+IMM 000008 \n", "ascii"))
+    time.sleep(1.5)
+    ser.write(bytearray("+IMM 000808 \n", "ascii"))
+    time.sleep(0.5)
+    ser.write(bytearray("+IMM 000008 \n", "ascii"))
+    time.sleep(0.5)
+    ser.write(bytearray("+IMM 000408 \n", "ascii"))
+    time.sleep(0.5)
+    ser.write(bytearray("+IMM 000008 \n", "ascii"))
+    time.sleep(1.5)
